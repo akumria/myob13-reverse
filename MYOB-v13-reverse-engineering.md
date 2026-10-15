@@ -1,0 +1,351 @@
+# MYOB Accounting v13 (Australia) — reverse engineering notes
+
+Working dir for binaries: `/tmp/opencode/myob13/cab/` (extracted from `Data1.cab`).
+Source: Internet Archive `myob-accounting-plus-v13`, see `MYOB-v13-finder.md`.
+
+Verified identity: `myob.exe` = FileVersion `7.0.1C`, ProductVersion `13 Australia`,
+ProductName `MYOB Accounting for Windows`. Matches the About dialog line-for-line.
+
+---
+
+## 1. Architecture
+
+`myob.exe` is a **Borland C++ Builder / Delphi** binary. PE section names are one per
+compilation unit and map directly onto business areas:
+
+```
+Analysis  .text  Analysis  ARAP1Cod  ARAP2Cod  ARAP3Cod  ARAP4Cod
+CardCode  ChartCod  CheckCod  InvCodeS  PayrollD  PayrollE  PayrollE
+PayrollW  .rdata  .data  .rsrc
+```
+
+- `ARAP1..4` — Accounts Receivable / Payable (four modules)
+- `CardCode` — Cards file (customers / suppliers / employees)
+- `ChartCod` — Chart of accounts
+- `CheckCod` — Cheques / bank reconciliation
+- `InvCodeS` — Inventory
+- `PayrollD/E/W` — Payroll (detail / employee / wage)
+
+Borland toolchain is confirmed by the `LZ32.dll` import (Borland LZ runtime) plus
+`MFC42.dll` and `MSVCRT.dll` for the mixed third-party components.
+
+### Component map
+
+| File | FileDescription | FileVersion | ProductVersion | Role |
+|---|---|---|---|---|
+| `myob.exe` | MYOB Accounting Application File | 7.0.1.0 | 13 Australia | Main UI app |
+| `MYOBSp32.dll` | MYOB Data Support File | 6.5.0.0 | — | **Data Manager (DM) record API** |
+| `ctmyob32.dll` | MYOB Record Manager File | 4.0.0.0 | — | **FairCom c-tree Plus VMS engine** |
+| `MYOBIn32.dll` | MYOB INI 32-bit dll | 2.0.0.0 | — | INI / preferences |
+| `myobsbt.dll` | MYOB Data - SBCM Filter | 2.4.0.0 | — | Record filter |
+| `FtoP.dll` | MYOB Data Upgrade File | 7.0.1B | **12 Australia** | v12 → v13 data converter |
+| `PtoP.dll` | MYOB Data Upgrade File | 7.0.1B | — | Premier data converter |
+| `MtoM.dll` | MYOB Version 8 Data Upgrade | 8.2.1 | — | v8 → v13 converter |
+| `MtoP.dll` | MYOB AccountEdge Data Upgrade | 7.0.1B | **3 Australia** | v3 → v13 converter |
+| `MYOBUpg.exe` | MYOB Accounting Data Upgrade | 7.0.0.0 | — | Upgrade orchestrator |
+| `MyobPOpt.exe` | MYOB Accounting Data Optimiser | 7.0.0.0 | — | Compacts company file |
+| `TemplatesUpgrader.exe` | Templates Upgrader for MYOB | 3.0.3.0 | — | Form templates |
+| `BASlink*.dll/.exe/.ocx` | MYOB BASlink v4 (VB6, `MSVBVM60.DLL`) | 4.0.0.x | — | ODBC / data access layer |
+| `*.frm` | binary print templates | — | — | e.g. "Tax Inclusive Pre-Printed Invoice" |
+
+The `*toP` / `*toM` DLLs are worth keeping: they are *readers for older company-file
+formats* plus writers for v13, so each one is a reference implementation of two formats.
+
+---
+
+## 2. Storage: FairCom c-tree Plus VMS
+
+`ctmyob32.dll` is a **complete c-tree Plus runtime**. Evidence:
+
+- Its 208 exports are c-tree's own API — `ctree`, `ctuseg`, `cttseg`, `ctcatend`,
+  `ctgetnod`, `cttestfunc`, `ctrt_filcmp`, `ViewCtreeError`, `ctREG_DEF_ID`,
+  `InitCtreeGV` / `SetCtreeGV` / `FreeCtreeGV` / `GetCtreeGV`,
+  `ctgetseginfo`, `ctlfsegget`, `ctlfsegput`, `ctSETENCRYPT`.
+- Record ops: `WRTREC`, `REDREC`, `ADDREC`, `DELREC`, `NEWREC`, `LSTREC`,
+  `NXTREC`, `PRVREC`, `GTEREC`, `LTEREC`, `ESTKEY`, `FRCKEY`, `ORDKEY`.
+- File ops: `OPNFIL`, `CLSFIL`, `CREIFIL`, `OPNIFIL`, `DELFIL`, `GETFIL`.
+- Index ops: `GETCIDX`, `CREIDX`, `RBLIIDX`, `RBLIFIL`.
+- Built-in copyright: `Copyright (c) 1984-1998 FairCom Corporation`,
+  `c-tree Plus(R)`.
+- It carries c-tree's **own header-dump and rebuild diagnostics**, which enumerate
+  the on-disk header fields (see §5).
+
+"ct" is literally c-tree. This also explains the About dialog crediting
+FairCom Corp.
+
+### The MYOB layer above it
+
+`MYOBSp32.dll` is a clean record-oriented wrapper ("DM" = Data Manager) with 230
+exports. Every function has a `_Name@N` stdcall alias, so argument counts are free
+(`_DMBuildKey@20` = 5 args).
+
+| Area | Exports |
+|---|---|
+| Lifecycle | `DMInitialize`, `DMExit`, `DMOpenFile`, `DMCloseFile`, `DMOpenDataFile`, `DMCloseDataFile`, `DMCreateMYOBDat` |
+| Navigation | `DMFirstRecord`, `DMLastRecord`, `DMNextRecord`, `DMPrevRecord`, `DMGTRecord`, `DMLTRecord`, `DMGTERecord`, `DMLTERecord` |
+| Record ops | `DMNewRecord`, `DMNewNumberedRecord`, `DMReadRecord`, `DMDeleteRecord`, `DMUseRecord`, `DMUseRecordXtd`, `DMReleaseRecord`, `DMSetRecHandle` |
+| Keys | `DMBuildKey`, `DMTransformKey`, `DMUntransformKey`, `DMGetKey`, `DMFirstKey`, `DMNextKey`, `DMGetKey`/`DMLTGetKey` |
+| **Schema** | **`DMGetDODANameList`** (c-tree DODA field-definition array), `DMGetConditionalIndexList`, `DMGetAlternateSequence`, `DMGetIndexDupsAllowed` |
+| Meta | `DMSetCountryCode`, `DMGetVersionInfo`, `DMGetVersionInfoForFile`, `DMVerifyFile`, `DMGetDODANameList` |
+| Counting | `DMGetRecordCount`, `DMCountUsers`, `DMIsFileLocked`, `DMHasExclusiveAccess` |
+| Transactions | `DMBeginTransaction`, `DMCommitTransaction`, `DMAbortTransaction`, `DMAddRollbackRecord`, `DMBeginBackup`, `DMEndBackup` |
+| Multi-user | `IMInitialize`, `IMRegisterUser`, `IMUnregisterUser`, `IMGetLocalNode` |
+
+`DMGetDODANameList` is the important one: **DODA** is FairCom's Data Object
+Definition Array, i.e. the schema. FairCom even ships a `ctinfo` utility whose
+sole job is "retrieves IFIL and DODA structures from a FairCom DB file".
+
+---
+
+## 3. Company-file layout
+
+A v13 company is **not a single file**. It is a folder of one c-tree VMS data file
+per logical table, plus an index (`idx`) for each, plus a `.prm` preferences file.
+
+Recovered verbatim from the file catalogue embedded in the shipped sample company
+`tutorial.dat`:
+
+```
+C:\PREMIER7\tutorial.prm
+```
+
+Catalogued tables (8.3 stems, so names are truncated):
+
+| Stem | Read as | Likely content |
+|---|---|---|
+| `tran` | transactions | Transaction headers |
+| `line` | transaction lines | Line detail |
+| `cards` | cards | Customers / suppliers |
+| `cal`, `cacc` | chart of accounts | Account list + config |
+| `items`, `inv` | inventory | Items + stock |
+| `job` | jobs | Job costing |
+| `hist`, `hst`, `shist`, `lshist` | history | Balance history |
+| `curcy` | currencies | FX rates |
+| `tax` | tax | Tax codes |
+| `disc` | discounts | Discounts |
+| `memo` | memo | Memo / notes |
+| `cmnt`, `contc` | comments / contacts | |
+| `jcash`, `rcash` | job cash / receipt cash | Cash tracking |
+| `tg` | tax groups | |
+| `mtg` | meeting / categories | |
+| `alpha` | alphabetic index | A–Z lookup |
+| `auto` | auto numbering | |
+| `addr` | addresses | |
+| `misc`, `msc` | miscellaneous | |
+| `pen` | pending | |
+| `prcat`, `lst`, `prc` | price categories / lists | |
+| `bl` | balance / budgets | |
+| `il` | mailing | |
+| `rnpr` | reprint | |
+| `log` | log | |
+| `erms` | terms | Payment terms |
+
+Catalog entry framing (from hex): each entry is
+`<flag:1> <8.3 name:8> <4-byte value>` where the flag's high nibble is the
+c-tree record type (`0xF6`/`0xF7`/`0xF8`), followed by a matching `idx` entry.
+Byte-exact decode still pending confirmation via decompile.
+
+The `.dat` files shipped in the install (`Clearwtr.dat`, `tutorial.dat`) are the two
+**sample companies** (Clearwater and Tutorial). Per-table files are created on first
+open, so the individual `tran.dat` / `cards.dat` etc. are *not* distributed.
+
+`C:\PREMIER7\tutorial.prm` shows these samples originated in the Premier v7 product
+and were reused.
+
+---
+
+## 4. Password / protection system
+
+### What is NOT there
+
+No standard cryptographic constants exist in `myob.exe`, `ctmyob32.dll`,
+`MYOBSp32.dll` or `myobsbt.dll`. Searched for and **not found**:
+
+- MD5 / SHA-1 init vectors (`0x67452301`, `0xefcdab89`, `0x98badcfe`, `0x10325476`)
+- SHA-1 round constants (`0x5a827999`, `0x6ed9eba1`, `0x8f1bbcdc`, `0xca62c1d6`)
+- MD5 T-table (`0xd76aa478`, `0xe8c7b756`, …)
+- SHA-256 K (`0x428a2f98`, …)
+- Blowfish P-array (`0x243f6a88`, …)
+- CRC-32 polynomial (`0xedb88320`)
+
+So there is **no MD5/SHA/DES/Blowfish/CRC anywhere** in the stack. Whatever the
+scheme is, it is a custom, home-grown construction.
+
+### The two distinct "passwords"
+
+1. **Company file password** — set via Company Information ("Change passwords, fonts,
+   and MYOB parameters"). Stored in the company `.prm`. Failure path string in
+   `myob.exe`: `The password you have entered is incorrect.`
+2. **Registration serial** — `Help > Register Now`. Gates *write* access;
+   unregistered, v13 opens company files read-only.
+
+These are independent. The serial is not a licence unlock in the modern sense — it is
+a hardcoded check inside `myob.exe`.
+
+### Available hooks
+
+- `ctSETENCRYPT` in `ctmyob32.dll` — decompiled via REA/Ghidra: it is
+  `FUN_100057de(0x1c6)`, i.e. it pushes **raw-function index 470** into c-tree's
+  dispatcher. That is FairCom's own optional file encryption, not MYOB code.
+  **Verified unused:** `MYOBSp32.dll` — the only module that imports `ctmyob32.dll` —
+  imports *none* of `ctSETENCRYPT`, `SECURITY`, `SERIALNUM` or `CTUSER`. MYOB v13
+  company files are therefore **stored unencrypted**.
+- `SECURITY`, `SERIALNUM`, `CTUSER` exports in `ctmyob32.dll`.
+- `DMVerifyFile`, `DMGetVersionInfo` in `MYOBSp32.dll`.
+- c-tree's own serial-number field in the file header (visible in the header-dump
+  diagnostics) — note this is a c-tree record serial number, unrelated to MYOB
+  registration.
+
+### Correction
+
+An earlier read of the odd-looking tables in `ctmyob32.dll`
+(`mOMKIGECA?=;9753`, `)*+,-./012345679:;=>?@A8BCD…`) as a possible obfuscation
+alphabet was **wrong**. They are c-tree **collating sequences** — key-ordering tables.
+The giveaway is the repeating `<char> :<char> :` collation-entry pattern throughout
+the region at `0x050000`+.
+
+Status: **not yet reversed.** `myob.exe` (6.7 MB) is queued for Ghidra analysis; the
+target is the check reached by xref to the
+`The password you have entered is incorrect.` string.
+
+---
+
+## 5. c-tree on-disk header fields
+
+Recovered from `ctmyob32.dll`'s own header-dump diagnostics — these are the actual
+header member names:
+
+```
+configuration version      index root ptr            node size
+superfile last member#     data record length        extend file size
+max bytes per leaf node    max bytes per non-leaf    file mode
+key length                 file type                 # of additional members
+update flag                index member number       key type
+file id number             duplicate flag            server id number
+# of active entries        current node ptr          delete stack ptr
+index high transaction#    last byte used            serial number
+last physical byte         delete type               permanent file mode flags
+superfile type             leaf anchor ptr           superfile member #
+file flavor                file alignment            key padding byte
+maximum name length        header record ptr         resource header ptr
+```
+
+Plus extended-header concepts from FairCom's own docs: `XCREblk` (extended creation
+block), `DEF_MASK_IFIL2`, `DEF_MASK_XTDPRM`, `DEF_MASK_UNIACS`, `DEF_MASK_HUGEFL`,
+`DEF_MASK_HDRSZ4`, and file mode flags `ctFRC2HDRS`, `ctTRANDEP`, `ctFILEPOS8`,
+`ctFILCRECHK`.
+
+Sample file header (`tutorial.dat`, first 128 bytes, LE dwords):
+
+| Offset | Value | Note |
+|---|---|---|
+| `0x00` | `0x000dffff` | flags / marker |
+| `0x04` | `0x00000000` | |
+| `0x08` | `0x000d898f` | 887,439 — logical size |
+| `0x0c` | `0x00000800` | 2048 — page size / hdrsiz |
+| `0x10` | `0x0000004f` | |
+| `0x14` | `0x00000052` | |
+| `0x28` | `0x08000081` | file mode-ish flags |
+| `0x2c` | `0x80000000` | |
+| `0x30` | `0x02040207` | |
+| `0x34` | `0x07ee07e0` | |
+| `0x80`–`0x7ff` | all `0xFF` | padding; data starts at `0x800` |
+
+`Clearwtr.dat` has the same layout with `0x0033ffff` / `0x0033a8f9` at offsets
+`0x00` / `0x08`.
+
+c-tree record framing (per community reverse-engineering of c-tree v4): first byte is
+a record-type tag in the `0xFA`–`0xFF` range (`0xFF` terminates), followed by length
+fields, with null-terminated strings.
+
+---
+
+## 6. Schema extracted from the file itself — **done**
+
+The company `.dat` embeds a **self-describing schema**. No Windows needed.
+
+Layout, per table:
+
+1. 8.3 filename pair (`<name>.dat`, `<name>.idx`)
+2. a 16-bit field-id enumeration table
+3. **length-prefixed field names**, where the declared length is `strlen(name) + 2`
+   (the extra 2 bytes are c-tree's field type marker)
+4. a `FE FE` c-tree record mark followed by a 12-byte fixed-width name field
+   holding the record type with c-tree's `Z` name marker, e.g. `MiscRecZ`, `CardRecZ`
+
+Field names and the record-type name can be **tens of KB apart**, so the association
+is *ordinal*, not proximate: merge-join the k-th field-name run with the k-th `*RecZ`.
+
+Parser: `myob13_schema.py` → `myob13_schema.json` (35 record types).
+
+**Validation:** the two independent sample companies (`tutorial.dat`,
+`Clearwtr.dat`) yield identical record-type sets and identical field lists for every
+record. 41 field runs vs 35 record types, so ~6 runs are not schema records — the
+join is approximate at the margins but every record listed below is internally
+coherent.
+
+### Record types recovered (35)
+
+| Record | Fields | Maps to |
+|---|---|---|
+| `ChtAcctRec` | 68 | Chart of accounts — `Opening_Balance`, `Current_Balance`, `Activity00`–`Activity112`, `Budget0`–`Budget6` |
+| `CardRec` | 32 | Customer / Supplier / Employee — `Name`, `Card_ID`, `Is_Inactive`, `First_Address`…`Fifth_Address`, `Terms`, `Currency`, `Payment_Method`, `Hourly_Cost`, `Billing_Rate`, `Default_Account`, `Salesperson` |
+| `CTranRec` | 41 | Transaction header — `Amount`, `Account`, `Card`, `Reference`, `Sale_Purchase`, `Transaction_Date`, `Journal`, `Period`, `Year`, `Currency_Tag`, `Status`, `Source`, `Memo`, `Reconciliation_Date` |
+| `ILRec` | 24 | Transaction line — `Quantity`, `Price`, `Discount`, `Amount`, `Cost`, **`Parent`** (FK → `CTranRec`), `Item`, `Job`, `Account`, `Tax_Code`, `Line_Type` |
+| `ItemsRec` | 73 | Inventory items |
+| `InvRec` | 35 | Inventory / stock on hand |
+| `JobRec` | 108 | Job costing |
+| `LogRec` | 11 | Activity log |
+| `TaxRec` | 14 | Tax calculation detail |
+| `TxCodRec` | 15 | Tax codes — `Rate`, `ECRate`, `Tax_Threshold`, `Collected_Account`, `Paid_Account` |
+| `RInvRec` | 25 | Receipt / invoice |
+| `RILRec` | 22 | Receipt / invoice line |
+| `RCashRec`, `JCashRec` | 28, 18 | Cash tracking |
+| `PRCatRec`, `PRLstRec`, `PRHstRec`, `PRMiscRec`, `PRPensnRec`, `PRTaxRec`, `PRTblRec` | 8–34 | Payroll: categories, lists, history, pension schemes, tax, tax tables |
+| `CalRec`, `SHistRec`, `JHistRec`, `IHistRec`, `MemoRec`, `AddrRec`, `IpTxtRec`, `AlphaRec`, `AutoRec`, `CmntRec`, `TermsRec`, `SlipRec`, `ConsTCRec` | 7–46 | Calendar, history, memos, addresses, payment terms, etc. |
+
+Authenticity check: MYOB's own schema contains the typo **`Foruth_Address`** in
+`CardRec`, and `Desposit_Status` in `CTranRec` — consistent with real 2003 source.
+
+---
+
+## 7. Recommended extraction strategy
+
+Three options, in increasing order of effort:
+
+### A. Use MYOB's own exports (least work, most reliable)
+MYOB v13 has extensive CSV / report export. Open the company in MYOB and export Cards,
+Transactions + lines, Chart of accounts, Payroll. Then map CSV → ERPNext doctypes.
+This is what commercial MYOB→Xero migration tools actually do.
+
+### B. Call `MYOBSp32.dll` directly (best fidelity)
+Self-contained exported Win32 API. Load it (32-bit) and drive
+`DMInitialize` → `DMOpenDataFile` → `DMGetDODANameList` → `DMFirstRecord` /
+`DMReadRecord`. Needs a 32-bit Windows or Wine environment.
+
+### C. Pure-Python reader (no Windows) — **now viable**
+The format is identified, the header fields are known, and the schema is
+self-describing. Remaining work: the record payload layout (offset/type/length per
+DODA field) and key/index walking. The 16-bit enumeration table preceding each field
+list likely encodes field ids/types.
+
+---
+
+## 7. Tooling
+
+- **REA** (`rea`, v6.5.0) — installed via `npm i -g rea-agents`. Evidence-oriented RE
+  CLI wrapping Rizin/Ghidra. `rea doctor` reports the opencode MCP registration as
+  missing; `rea setup` would fix it but needs a client restart.
+- **Ghidra 12.1.4** — installed to `/tmp/opencode/ghidra/` (12.1.x is what REA
+  requires). Set `GHIDRA_INSTALL_DIR` to make REA's ghidra provider available.
+
+## 9. Open questions
+
+- [x] Which storage engine — FairCom c-tree Plus VMS, `ctmyob32.dll`
+- [x] Which layer MYOB sits on — `MYOBSp32.dll` DM record API
+- [x] Company file layout — folder of per-table `.dat`/`.idx` + `.prm`
+- [x] Record-type names and field names — 35 record types extracted and validated
+- [x] Whether c-tree file encryption is used — **no**, verified via imports
+- [ ] Field offset/type/length per record (needs record payload decoding)
+- [ ] Company file password scheme (needs `myob.exe` decompile)
+- [ ] Registration serial check (needs `myob.exe` decompile)
