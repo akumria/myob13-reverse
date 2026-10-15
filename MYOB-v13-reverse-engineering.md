@@ -323,6 +323,49 @@ Authenticity check: MYOB's own schema contains the typo **`Foruth_Address`** in
 
 ---
 
+## 6a. The `.prm` question — answered from MYOB's own docs and a real backup
+
+**MYOB v13's "Create Backup" produces no `.prm` at all.** Verified against a real
+company backup (`MYOB-backup-2026-10-02T17-52.ZIP`, 382 entries): it contains the
+company `.dat` plus the user's `myob13/` folder (229 `.xlt` Excel export templates,
+87 `.frm` forms, 11 `.wpt`, 10 `.dot`, 8 `.rpt`, images) and nothing else. No `.prm`,
+no `.ini`.
+
+### What MYOB's help says the password is
+
+From the shipped help (`company_25/27/48/49/50/51/52.htm`, `tips_162.htm`):
+
+- The security system is a **master password plus sub-passwords**.
+- *"You can have only one master password in a single company file."* — so it is
+  **per-company-file**, not a global application setting.
+- *"If your system uses passwords, you'll enter the password when you start Accounting
+  or switch from one company file to another"* — matches the Sign-on dialog.
+- **Stored in plaintext:** *"Click Edit. The Set Up Passwords window appears,
+  displaying the password."*
+- Passwords gate *operations* (delete a sale, print cheques, payroll, Easy Setup), not
+  data access — consistent with the file being readable without one.
+- Forgotten master password: MYOB support will *"examine your company file and provide
+  you with the needed password"* for a fee — i.e. it is extractable from the file.
+- Reached via **Preferences window → Security view → Passwords** button.
+
+### Where it actually lives
+
+Not in the DODA records (no password field in any of the 35 record types), and not in
+the file header. Differential comparison of the company-info record against the
+*unlocked* sample (`Clearwtr.dat`) shows the protected company file has **extra linked
+sub-records** the unlocked sample does not — three c-tree record pointers
+(`0x258b4d`, `0x257716`, `0x256d56`) where Clearwtr has none:
+
+```
+Clearwtr.dat   0x07f971  (all zero)                  0x07f9bd  ff ff ff ff
+real .dat    0x075a31  4b 00 00 00                 0x075a71  00 00 ff ff
+                                          + ptr 0x258b4d / 0x257716 / 0x256d56
+```
+
+So the security/password data lives in a **linked record hanging off the company-info
+record**, not in a `.prm`. Locating it exactly needs either a reference company with a
+known password for diffing, or decompiling the security code path in `myob.exe`.
+
 ## 6b. The password does not protect the data
 
 Tested against a real 70 MB company file. **It is not encrypted** — every record is
