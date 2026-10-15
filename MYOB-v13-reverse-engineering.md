@@ -204,9 +204,23 @@ alphabet was **wrong**. They are c-tree **collating sequences** — key-ordering
 The giveaway is the repeating `<char> :<char> :` collation-entry pattern throughout
 the region at `0x050000`+.
 
-Status: **not yet reversed.** `myob.exe` (6.7 MB) is queued for Ghidra analysis; the
-target is the check reached by xref to the
-`The password you have entered is incorrect.` string.
+Status: **not reversed, and moot for the migration.** See §6b - the file is not
+encrypted, so the password is not needed to read the data.
+
+What was traced: `myob.exe` imported into Ghidra 12.1.4. The string
+`The password you have entered is incorrect.` is at VA `0x00a6d15a`, but it lives in
+`.rsrc` (file offset `0x66115a`), not in a code section. Ghidra creates no direct
+reference, and there is no absolute-address operand anywhere in the binary pointing at
+it. It is a **form-resource string**, so the chain to the check is
+
+    resource string -> MYOB's runtime string table -> use site
+
+To continue: enumerate the resource string table the way `myob.exe` builds it at
+startup, find the entry for this string, then take the xref from that table slot.
+
+`Myobres.res` is the resource carrying the About box, and the same mechanism produced
+`Tax Table Revision Date:  ^0` (a runtime `^0` substitution token), so the About dialog
+and the password dialog are reached the same way.
 
 ---
 
@@ -309,7 +323,68 @@ Authenticity check: MYOB's own schema contains the typo **`Foruth_Address`** in
 
 ---
 
-## 7. Recommended extraction strategy
+## 6b. The password does not protect the data
+
+Tested against a real 70 MB company file. **It is not encrypted** — every record is
+in cleartext:
+
+```
+<company name redacted>
+Sale #00011696 for $258.50
+<address redacted>
+<customer names redacted>
+```
+
+So the password is an application-level gate checked by `myob.exe` at open time, not a
+key over the records. **A lost password costs access through the MYOB UI, not access to
+the data.** This is the single most important practical finding for the migration: the
+file is recoverable without ever recovering the password.
+
+---
+
+## 6c. Record framing (decoded)
+
+c-tree VMS data record:
+
+```
+<FA FA> <len1:u32> <len2:u32> <class:u32> ...header... <payload: len2 bytes>
+```
+
+- `FA FA` — data-record mark. `FE FE` — resource record (holds the schema/catalogue).
+- `len1` — stored record length; `len2` — payload length; always `len1 - len2 == 18`.
+- `class` (`len3`) — record-family discriminator.
+- Payload begins after a header whose size **varies by record class**, because the
+  header carries the index key. Observed 0x18–0x28. Auto-tuned per class by choosing
+  the alignment that yields the most complete NUL-terminated strings.
+- Fields inside the payload are a mix of fixed binary values and NUL-terminated
+  strings, so records are **not** purely NUL-delimited — a naive token count does not
+  match the schema field counts.
+
+Records sharing a `(class, payload_len)` pair are the same record type. In the real
+company file this yields 137,447 records across 2,680 classes, and the classes are
+self-describing by content:
+
+| Class | Count | Content |
+|---|---|---|
+| 4 | 32,395 | Sales / Payments / Purchases (`Sale #00010377 for $495.00`) |
+| 28 | 30,373 | numeric activity records |
+| 14, 15 | 44,130 | index structures |
+| 6 | 9,890 | addresses + short cards (`511 Pacific Highway, Mt Colah, NSW 2079`) |
+| **22** | **2,344** | **Cards** — customer/supplier master, fixed 352-byte payload |
+| 38, 24, 32, 30 | 10,420 | further record types |
+
+Card records contain `Name`, `Search_Name`, `Card_ID` and a trailing auto-numbered
+numeric card ID (little-endian, sequential).
+
+### Partial decode still outstanding
+
+The per-field descriptor table (2×`u16` per field, immediately preceding the field
+names) was located but **not yet correctly aligned** — `First_Address` is measured at
+40 bytes while the table yields 59, so there is an offset or ordering error to
+resolve. Until that is done, field-level typing of numeric/date values is
+heuristic.
+
+---
 
 Three options, in increasing order of effort:
 
@@ -347,5 +422,6 @@ list likely encodes field ids/types.
 - [x] Record-type names and field names — 35 record types extracted and validated
 - [x] Whether c-tree file encryption is used — **no**, verified via imports
 - [ ] Field offset/type/length per record (needs record payload decoding)
-- [ ] Company file password scheme (needs `myob.exe` decompile)
+- [ ] Company file password scheme — string traced to `.rsrc`, indirection unresolved
+      (moot: file is unencrypted)
 - [ ] Registration serial check (needs `myob.exe` decompile)
