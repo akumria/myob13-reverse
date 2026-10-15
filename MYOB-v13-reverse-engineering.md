@@ -366,6 +366,79 @@ So the security/password data lives in a **linked record hanging off the company
 record**, not in a `.prm`. Locating it exactly needs either a reference company with a
 known password for diffing, or decompiling the security code path in `myob.exe`.
 
+## 6c. Master password storage — SOLVED
+
+Cracked by differential analysis against a controlled reference pair: the same
+company created twice, once without a password and once with the master password
+`TESTPW123` (`-reference.dat` vs `-reference.dat`). The two files are
+byte-for-byte the same size and differ in only 1,149 bytes across 180 regions. Exactly
+one of those regions is a **706-byte `FA FA` record** at `0xb1000` that is pure `ff`
+(never written) in the unprotected file.
+
+The password is **plaintext**, obfuscated by a fixed 4-byte **additive** key:
+
+```
+stored[i] = (plaintext[i] + KEY[i % 4]) & 0xFF
+KEY       = 8D 96 9D 95        (141 150 157 149)
+```
+
+Observed directly:
+
+```
+offset  stored  plaintext  delta
+  +00    e1       T  'T'    8D
+  +01    db       E  'E'    96
+  +02    f0       S  'S'    9D
+  +03    e9       T  'T'    95
+  +04    dd       P  'P'    8D    <- key cycles
+  +05    ed       W  'W'    96
+  +06    ce       1  '1'    9D
+  +07    c7       2  '2'    95
+  +08    c0       3  '3'    8D
+```
+
+### Record layout
+
+| offset | size | value |
+|--------|------|-------|
+| +0x00  | 2    | `fa fa` c-tree data record mark |
+| +0x02  | 4    | `len1` = 706, total record length |
+| +0x06  | 4    | `len2` = 688, payload length (`len1 - len2 == 18`) |
+| +0x0A  | 4    | class = 2 |
+| +0x0E  | 84   | index key (varies per file) |
+| +0x62  | var  | **stored password**, NUL terminated, additive key applied from phase 0 |
+| +0x62+ | rest | all zero — sub-password list; empty here, so no sub-passwords |
+
+The key is a **compile-time constant** in `MYOBSp32.dll`; it is not derived from the
+company name, file ID or any file property. Confirmed by recovering `TESTPW123` from
+*<test company>* and `<redacted>` from *<company name redacted>* with the same key.
+
+### Result for the company file
+
+```
+$ python3 myob13_password.py /tmp/company.dat
+master password @ 0x7a95e -> '<redacted>'
+```
+
+**The master password for `company.dat` is `<redacted>`.** The record contains no
+sub-passwords, so the master password grants full access.
+
+### Tool
+
+`myob13_password.py` — validated 4/4: recovers `TESTPW123` from the protected
+reference, and correctly reports the unprotected reference plus both shipped sample
+companies (`Clearwtr.dat`, `tutorial.dat`) as having no password.
+
+Two implementation traps worth recording:
+
+1. The stored form is NUL terminated, so truncate at the first raw `0x00` **before**
+   decoding. Decoding a run of NULs wraps into the printable string
+   `sjcksjcksjc...` (because `0x00 - 0x8D = 0x73 = 's'`), which floods the output with
+   false positives.
+2. `len1 == 706 && class == 2` is not unique — around 32 records in the company file
+   match that shape. A minimum password length of 4 characters is needed to reject
+   one-byte coincidences.
+
 ## 6b. The password does not protect the data
 
 Tested against a real 70 MB company file. **It is not encrypted** — every record is
