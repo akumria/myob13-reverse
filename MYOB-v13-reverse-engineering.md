@@ -376,6 +376,17 @@ self-describing by content:
 Card records contain `Name`, `Search_Name`, `Card_ID` and a trailing auto-numbered
 numeric card ID (little-endian, sequential).
 
+### Customer master (built)
+
+`myob13_customers.py` uses the class-22 card headers as the authoritative card
+list, then enriches from class-6 per-card detail records by name match. On the
+real company file this yields **2,152 customers** with names, some contacts and
+emails extracted.
+
+Address and ABN enrichment is weak (only ~50 addresses, 1 ABN recovered) because
+addresses sit in a different record type and the field-offset decode is not yet
+resolved. Customer *names* are complete and clean.
+
 ### Partial decode still outstanding
 
 The per-field descriptor table (2×`u16` per field, immediately preceding the field
