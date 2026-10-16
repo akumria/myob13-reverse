@@ -353,4 +353,8 @@ README is tied to a specific, re-runnable check; the reproduction commands are i
 
 ## License
 
-**Not yet chosen — add one before publishing.**
+Public domain, dedicated under [CC0 1.0 Universal](LICENSE).
+
+To the extent possible under law, the authors have waived all copyright and
+related or neighbouring rights to this work. The software is provided as-is,
+without warranty of any kind.
