@@ -3,8 +3,10 @@
 
 MYOB Accounting v13 stores the master password in plaintext inside a
 single c-tree data record, obfuscated with a fixed 4-byte additive key.
-The key is a compile-time constant in MYOBSp32.dll -- it is NOT derived
-from the company name or any file property (verified against two
+The key is a compile-time constant in the two Borland-compiled MYOB modules --
+myob.exe (four copies, VA 0x7A8AF0) and myobsbt.dll (one copy, VA 0x1005E21C),
+both in their .data string pool. It does NOT appear in MYOBSp32.dll. It is NOT
+derived from the company name or any file property (verified against two
 differently-named companies).
 
 Record layout (found at offset +0x00 of a class-2, 706-byte record):

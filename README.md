@@ -136,9 +136,13 @@ stored[i] = (plaintext[i] + KEY[i % 4]) & 0xFF
 KEY       = 8D 96 9D 95
 ```
 
-The key is a compile-time constant in `MYOBSp32.dll`, independent of the company
-name — it recovers the same way from two differently-named companies. Addition,
-not XOR.
+The key is a compile-time constant in the two Borland-compiled MYOB modules —
+**`myob.exe`** (`.data`, four copies at VA `0x7A8AF0`) and **`myobsbt.dll`**
+(`.data`, one copy at VA `0x1005E21C`). It is *not* in `MYOBSp32.dll`. It is
+independent of the company name — it recovers the same way from two
+differently-named companies. Addition, not XOR.
+It is an arbitrary literal, not a crypto constant: it matches no hash of any
+MYOB-related string and is not readable text in any 8-bit codepage.
 
 It lives in a class-2, 706-byte `FA FA` record at offset `+0x62`, NUL-terminated.
 The same record holds the sub-password list (empty in the file examined, so the
@@ -168,7 +172,12 @@ creating the *same* company twice: once with no password, once with a known
 master password. Both files are byte-identical in size and differ in only 1,149
 bytes across 180 regions. Exactly one region is a 706-byte `FA FA` record that is
 pure `ff` (never written) in the unprotected file. The key was read off directly
-by subtracting known plaintext from stored bytes, not guessed. The tool is then
+by subtracting known plaintext from stored bytes, not guessed, and then located in
+the binary: a 4-byte literal held as a plain string constant in the `.data`
+section of `myob.exe` (VA `0x7A8AF0`, four copies) and `myobsbt.dll` (VA
+`0x1005E21C`, one copy), driving Borland-compiled `add`/`sub` loops indexed by
+`i mod 4` — two encrypt and two decrypt in the executable, one guarded class method
+in the DLL. The tool is then
 validated 4/4: it recovers the known password from the protected file, and
 correctly reports the unprotected file *and* both shipped sample companies as
 having no password.
@@ -202,6 +211,13 @@ notes. Both instances are left in the write-up.
 | Python | 3.14.8 | All parsing and extraction |
 | `pefile` | — | PE section/import/export inspection |
 | `msitools` / `7z` | — | Unpacking the MSI installer cabinet |
+
+These are installed **outside the repository** except where noted: REA comes from
+`npm i -g rea-agents` (`~/.local/lib/node_modules/rea-agents`), and Ghidra, the
+Temurin JDK, the MYOB v13 installer and the Ghidra project live in the gitignored
+`tools/` directory. Only their install archives are kept — run
+`tools/rea/extract.sh` to unpack any of them. See
+[MYOB-v13-reverse-engineering.md](MYOB-v13-reverse-engineering.md) §7 for exact paths.
 
 The 6.7 MB `myob.exe` is a Borland C++ Builder / Delphi binary — the linker
 emits one PE section per unit, and the unit names map straight onto the business

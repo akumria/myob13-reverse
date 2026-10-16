@@ -1,6 +1,8 @@
 # MYOB Accounting v13 (Australia) — reverse engineering notes
 
-Working dir for binaries: `/tmp/opencode/myob13/cab/` (extracted from `Data1.cab`).
+Working dir for binaries: `tools/myob13-installer/` (gitignored, local only). The
+6,361 installer files are **not** kept extracted — unpack them from the preserved
+archive with `tools/rea/extract.sh`, which yields `tools/myob13-installer/cab/`.
 Source: Internet Archive `myob-accounting-plus-v13`, see `MYOB-v13-finder.md`.
 
 Verified identity: `myob.exe` = FileVersion `7.0.1C`, ProductVersion `13 Australia`,
@@ -169,7 +171,10 @@ No standard cryptographic constants exist in `myob.exe`, `ctmyob32.dll`,
 - CRC-32 polynomial (`0xedb88320`)
 
 So there is **no MD5/SHA/DES/Blowfish/CRC anywhere** in the stack. Whatever the
-scheme is, it is a custom, home-grown construction.
+scheme is, it is a custom, home-grown construction. (It turned out to be a
+4-byte additive key held as a plain literal in `myob.exe` — see
+"Where the key actually lives" in §5. The absence of crypto constants was the
+right conclusion; MYOB's answer was to roll its own, badly.)
 
 ### The two distinct "passwords"
 
@@ -409,9 +414,88 @@ offset  stored  plaintext  delta
 | +0x62  | var  | **stored password**, NUL terminated, additive key applied from phase 0 |
 | +0x62+ | rest | all zero — sub-password list; empty here, so no sub-passwords |
 
-The key is a **compile-time constant** in `MYOBSp32.dll`; it is not derived from the
-company name, file ID or any file property. Confirmed by recovering the 9-character reference password from one
-test company and a 6-character password from an unrelated company, using the
+### Where the key actually lives: `myob.exe` and `myobsbt.dll`
+
+Earlier revisions of this document attributed the key to `MYOBSp32.dll`. **That is
+wrong.** Scanning all 24 byte-order permutations, `MYOBSp32.dll` (180 KB) and
+`ctmyob32.dll` (344 KB) contain the sequence **zero** times. It is a literal in the
+two Borland-compiled MYOB modules:
+
+- **`myob.exe`** — `.data` string pool, four identical NUL-padded copies
+- **`myobsbt.dll`** — `.data` string pool, one copy
+
+```
+myob.exe      file 0x3a8af0   VA 0x7A8AF0   (imagebase 0x00400000)
+              8d 96 9d 95 00 00 00 00   x4 at 0x7A8AF0 / AF8 / B00 / B08
+myobsbt.dll   file 0x05e21c   VA 0x1005E21C (imagebase 0x10000000)
+              8d 96 9d 95 00 00 00 00   (sits between "alpha" and "MYOBDataHandler:")
+```
+
+Both are read through Borland's signed-`mod` codegen for `i % 4` — which is also
+what pins the toolchain as Borland C++ Builder (`Analysis` PE sections, `.?AV`
+RTTI descriptors, no `MSVBVM60`/`borlndmm` import because the RTL is statically
+linked):
+
+```asm
+xor   ecx, ecx
+mov   edx, ecx
+and   edx, 0x80000003        ; ecx & 3, sign-corrected
+jns   +5
+dec   edx
+or    edx, 0xFFFFFFFC
+inc   edx
+mov   dl, byte ptr [edx + 0x7A8AF0]   ; KEY[i mod 4]
+mov   bl, byte ptr [ecx + esi]         ; plaintext byte
+add   bl, dl                          ; or: sub bl, dl
+mov   byte ptr [ecx + esi], bl
+inc   ecx
+cmp   ecx, eax
+jl    loop
+```
+
+`myob.exe` — four routines, two encrypt and two decrypt:
+
+| VA | operation | key literal | role |
+|---|---|---|---|
+| `0x635FE4` | `add bl, dl` | `0x7A8AF0` | encrypt, in place on a byte buffer |
+| `0x63603E` | `add bl, dl` | `0x7A8AF8` | encrypt, string variant |
+| `0x636094` | `sub bl, dl` | `0x7A8B00` | decrypt, byte-buffer variant |
+| `0x6360EE` | `sub bl, dl` | `0x7A8B08` | decrypt, string variant |
+
+The string wrappers sit at `VA 0x636000` (encrypt, 6 call sites) and `VA 0x6360B0`
+(decrypt, 1 call site at `0x686D39`). These four are the only key-lookup loops in
+the executable.
+
+`myobsbt.dll` — one routine, `VA 0x1000E6D0`, decrypt only. It is a class method
+(`thiscall`, `ret 4`) guarded by a virtual predicate:
+
+```asm
+mov  eax, [ecx]          ; vtable
+call [eax + 0x28]        ; virtual guard -- skip unless true
+test al, al
+je   <done>
+...
+repne scasb              ; strlen the password
+...
+mov  cl, byte ptr [ecx + 0x1005E21C]
+sub  bl, cl
+```
+
+So the scheme is MYOB's single general-purpose obfuscation helper, linked into
+both the application and the business-tools DLL, and applied to the master password
+and the sub-password list alike.
+
+This also settles §4's "no cryptography" finding: the key is not a crypto constant
+at all. `8D 96 9D 95` matches no CRC32 / Adler32 / djb2 / FNV / sdbm / MD5 / SHA of
+any MYOB-, product- or version-related string, is not readable in any 8-bit
+codepage (`0x8D` and `0x9D` are unassigned in Windows-1252), and has no arithmetic
+pattern (deltas `+9, +7, −8`). It is an arbitrary opaque literal — all four bytes
+have the high bit set, consistent with a developer picking deliberately
+non-typeable "random" values.
+
+The key is a compile-time constant, not derived from the company name, file ID or
+any file property. Confirmed by recovering the 9-character reference password from
+one test company and a 6-character password from an unrelated company, using the
 same key.
 
 ### Result for the real company file
@@ -540,11 +624,32 @@ list likely encodes field ids/types.
 
 ## 7. Tooling
 
-- **REA** (`rea`, v6.5.0) — installed via `npm i -g rea-agents`. Evidence-oriented RE
-  CLI wrapping Rizin/Ghidra. `rea doctor` reports the opencode MCP registration as
+Everything below lives under `tools/` in this repository, which is **gitignored**
+and local-only. Installed archives are kept; their extracted trees are not, so run
+`tools/rea/extract.sh` first (it is idempotent — it skips anything already unpacked).
+
+- **REA** (`rea`, v6.5.0) — installed via `npm i -g rea-agents`, so it lives in
+  `~/.local/lib/node_modules/rea-agents`, not in `tools/`. Evidence-oriented RE CLI
+  wrapping Rizin/Ghidra. `rea doctor` reports the opencode MCP registration as
   missing; `rea setup` would fix it but needs a client restart.
-- **Ghidra 12.1.4** — installed to `/tmp/opencode/ghidra/` (12.1.x is what REA
-  requires). Set `GHIDRA_INSTALL_DIR` to make REA's ghidra provider available.
+- **Ghidra 12.1.4** — archive at `tools/ghidra/ghidra.zip`; unpack to
+  `tools/ghidra/ghidra_12.1.4_PUBLIC/` (12.1.x is what REA requires). Set
+  `GHIDRA_INSTALL_DIR` to make REA's ghidra provider available.
+- **Temurin JDK 21** — archive at `tools/jdk21.tar.gz`; unpack to `tools/jdk21/`.
+  Ghidra needs a full JDK (the system JREs had no `javac`).
+- **MYOB v13 installer** — archive at `tools/myob13-installer/Data1.cab` (54 MB, 6,361
+  files); unpack to `tools/myob13-installer/cab/`. `myob.exe` (sha256
+  `f53e2190872c3d2f8046b7384139a80002939bf0e71e137d7eaf68d7cf539c35`) and the analysed
+  `MYOBSp32.dll` / `ctmyob32.dll` / `myobsbt.dll` all come out of it.
+- **Ghidra project** — `tools/ghidra-project/myob.gpr` + `myob.rep`. Kept extracted;
+  regenerating it costs a full headless analysis pass.
+- **REA output** — `tools/rea/` holds the `gh-*.log` runs, `*-analyze.json`,
+  `*.snap`, `postScript` helpers in `scripts/`, and the schema dumps
+  (`clearwtr_schema.json`, `ctsetenc.json`, `myob_cdx_*.txt`, `help_myob.txt`).
+
+Extraction was verified before the trees were dropped: Ghidra's 5,219 files and
+the installer's 6,361 files match their archives by name, size **and** CRC32, and
+`gzip -t` passes on `jdk21.tar.gz`.
 
 ## 9. Open questions
 
