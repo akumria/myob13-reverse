@@ -413,20 +413,24 @@ The key is a **compile-time constant** in `MYOBSp32.dll`; it is not derived from
 company name, file ID or any file property. Confirmed by recovering `TESTPW123` from
 *<test company>* and `<redacted>` from *<company name redacted>* with the same key.
 
-### Result for the company file
+### Result for the real company file
 
 ```
-$ python3 myob13_password.py /tmp/company.dat
-master password @ 0x7a95e -> '<redacted>'
+$ python3 myob13_password.py company.dat
+master password @ 0x7a95e -> '<redacted 6-char value>'
 ```
 
-**The master password for `company.dat` is `<redacted>`.** The record contains no
-sub-passwords, so the master password grants full access.
+The scheme was confirmed on that file (a 6-character password, independent of the
+9-character reference), and the record contained **no sub-passwords**, so the
+master password grants full access.
+
+> The recovered value is **deliberately redacted** from this document. It is a
+> live credential; re-run the tool to obtain it rather than copying it from here.
 
 ### Tool
 
-`myob13_password.py` — validated 4/4: recovers `TESTPW123` from the protected
-reference, and correctly reports the unprotected reference plus both shipped sample
+`myob13_password.py` — validated 4/4: recovers the known reference password from the protected
+file, and correctly reports the unprotected reference plus both shipped sample
 companies (`Clearwtr.dat`, `tutorial.dat`) as having no password.
 
 Two implementation traps worth recording:
