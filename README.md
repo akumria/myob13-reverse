@@ -205,7 +205,7 @@ notes. Both instances are left in the write-up.
 
 | Tool | Version | Role |
 |---|---|---|
-| [REA](https://github.com/rajaneeshankur/rea) | 6.5.0 | Evidence-oriented RE CLI wrapping Rizin/Ghidra |
+| [REA](https://rea.tools/) | 6.5.0 | Evidence-oriented RE CLI wrapping Rizin/Ghidra |
 | Ghidra | 12.1.4 PUBLIC | Disassembly/decompilation |
 | Eclipse Temurin JDK | 21.0.12.1 LTS | Ghidra needs a full JDK (the system JREs had no `javac`) |
 | Python | 3.14.8 | All parsing and extraction |
