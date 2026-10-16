@@ -3,7 +3,9 @@ __pycache__/
 data/
 
 # Reverse-engineering workspace, local-only: the MYOB v13 installer archive,
-# Ghidra + JDK archives, the Ghidra project, REA logs and analysis output.
-# Install archives are kept but their extracted trees are not -- run
-# tools/rea/extract.sh to unpack. Never committed.
-tools/
+# Ghidra + JDK archives, and REA/Ghidra analysis output. Install archives are
+# kept but their extracted trees are not -- run scripts/extract.sh to unpack.
+# tools/README.md is the one exception: it is tracked so there is always a
+# human-readable description of what belongs in here.
+tools/*
+!tools/README.md

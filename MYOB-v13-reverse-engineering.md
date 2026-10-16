@@ -2,7 +2,7 @@
 
 Working dir for binaries: `tools/myob13-installer/` (gitignored, local only). The
 6,361 installer files are **not** kept extracted — unpack them from the preserved
-archive with `tools/rea/extract.sh`, which yields `tools/myob13-installer/cab/`.
+archive with `scripts/extract.sh`, which yields `tools/myob13-installer/cab/`.
 Source: Internet Archive `myob-accounting-plus-v13`, see `MYOB-v13-finder.md`.
 
 Verified identity: `myob.exe` = FileVersion `7.0.1C`, ProductVersion `13 Australia`,
@@ -625,8 +625,11 @@ list likely encodes field ids/types.
 ## 7. Tooling
 
 Everything below lives under `tools/` in this repository, which is **gitignored**
-and local-only. Installed archives are kept; their extracted trees are not, so run
-`tools/rea/extract.sh` first (it is idempotent — it skips anything already unpacked).
+and local-only — with one exception: `tools/README.md` is tracked, so there is
+always a human-readable description of what belongs here. Installed archives are
+kept; their extracted trees are not, so run `scripts/extract.sh` first (it is
+idempotent — it skips anything already unpacked, and `scripts/extract.sh --check`
+reports what it would do without doing it).
 
 - **REA** (`rea`, v6.5.0) — installed via `npm i -g rea-agents`, so it lives in
   `~/.local/lib/node_modules/rea-agents`, not in `tools/`. Evidence-oriented RE CLI
@@ -641,11 +644,21 @@ and local-only. Installed archives are kept; their extracted trees are not, so r
   files); unpack to `tools/myob13-installer/cab/`. `myob.exe` (sha256
   `f53e2190872c3d2f8046b7384139a80002939bf0e71e137d7eaf68d7cf539c35`) and the analysed
   `MYOBSp32.dll` / `ctmyob32.dll` / `myobsbt.dll` all come out of it.
-- **Ghidra project** — `tools/ghidra-project/myob.gpr` + `myob.rep`. Kept extracted;
-  regenerating it costs a full headless analysis pass.
+- **Ghidra project** — was at `tools/ghidra-project/`; deleted as re-derivable.
+  Rebuild it by importing `tools/myob13-installer/cab/myob.exe` into a fresh project
+  and running `analyzeHeadless` (~5 minutes for this binary).
 - **REA output** — `tools/rea/` holds the `gh-*.log` runs, `*-analyze.json`,
-  `*.snap`, `postScript` helpers in `scripts/`, and the schema dumps
-  (`clearwtr_schema.json`, `ctsetenc.json`, `myob_cdx_*.txt`, `help_myob.txt`).
+  `*.snap` and the schema dumps (`clearwtr_schema.json`, `ctsetenc.json`,
+  `myob_cdx_*.txt`, `help_myob.txt`).
+- **Ghidra post-scripts** — `scripts/find_xref.py` and `scripts/FindXref.java` are
+  the same tool written both ways (Python and Java Ghidra scripts): find a string,
+  list what references it, and decompile the referencing functions. Both are
+  tracked in git.
+- **`tools/misc/`** — deliberately *not* tracked. Holds `scrub.sh`, the one-shot
+  `git filter-branch` filter used to redact the publisher's identifiers, and
+  `myob-prefilter.bundle`, a bundle of the pre-redaction history. Both contain the
+  personal identifiers that redaction removed, so neither belongs in the
+  repository.
 
 Extraction was verified before the trees were dropped: Ghidra's 5,219 files and
 the installer's 6,361 files match their archives by name, size **and** CRC32, and

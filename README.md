@@ -216,7 +216,7 @@ These are installed **outside the repository** except where noted: REA comes fro
 `npm i -g rea-agents` (`~/.local/lib/node_modules/rea-agents`), and Ghidra, the
 Temurin JDK, the MYOB v13 installer and the Ghidra project live in the gitignored
 `tools/` directory. Only their install archives are kept — run
-`tools/rea/extract.sh` to unpack any of them. See
+`scripts/extract.sh` to unpack any of them. See
 [MYOB-v13-reverse-engineering.md](MYOB-v13-reverse-engineering.md) §7 for exact paths.
 
 The 6.7 MB `myob.exe` is a Borland C++ Builder / Delphi binary — the linker
