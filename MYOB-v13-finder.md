@@ -34,7 +34,7 @@ downloadable v13 AU build I could locate.
 | Size | 60,454,660 bytes |
 | SHA-256 | `08b70f69522824949e8b2be22bbcfb87ee10d92b5923c53dfe6fb778a732d8c1` |
 | MD5 | `0cae4af82e4ea596081e9f1e39befbe2` |
-| Published | 2024-04-14, uploader `(email omitted)` |
+| Published | 2024-04-14, uploader (email omitted) |
 | Build date | MSI + cab stamped `2003-03-21` |
 
 ### Zip contents

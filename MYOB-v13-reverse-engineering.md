@@ -358,7 +358,7 @@ sub-records** the unlocked sample does not — three c-tree record pointers
 
 ```
 Clearwtr.dat   0x07f971  (all zero)                  0x07f9bd  ff ff ff ff
-real .dat    0x075a31  4b 00 00 00                 0x075a71  00 00 ff ff
+real .dat     0x075a31  4b 00 00 00                 0x075a71  00 00 ff ff
                                           + ptr 0x258b4d / 0x257716 / 0x256d56
 ```
 
@@ -370,7 +370,7 @@ known password for diffing, or decompiling the security code path in `myob.exe`.
 
 Cracked by differential analysis against a controlled reference pair: the same
 company created twice, once without a password and once with the master password
-`TESTPW123` (`-reference.dat` vs `-reference.dat`). The two files are
+`TESTPW123` (`clear.dat` vs `password.dat`). The two files are
 byte-for-byte the same size and differ in only 1,149 bytes across 180 regions. Exactly
 one of those regions is a **706-byte `FA FA` record** at `0xb1000` that is pure `ff`
 (never written) in the unprotected file.
@@ -410,8 +410,9 @@ offset  stored  plaintext  delta
 | +0x62+ | rest | all zero — sub-password list; empty here, so no sub-passwords |
 
 The key is a **compile-time constant** in `MYOBSp32.dll`; it is not derived from the
-company name, file ID or any file property. Confirmed by recovering `TESTPW123` from
-*<test company>* and `<redacted>` from *<company name redacted>* with the same key.
+company name, file ID or any file property. Confirmed by recovering the 9-character reference password from one
+test company and a 6-character password from an unrelated company, using the
+same key.
 
 ### Result for the real company file
 
@@ -439,13 +440,13 @@ Two implementation traps worth recording:
    decoding. Decoding a run of NULs wraps into the printable string
    `sjcksjcksjc...` (because `0x00 - 0x8D = 0x73 = 's'`), which floods the output with
    false positives.
-2. `len1 == 706 && class == 2` is not unique — around 32 records in the company file
+2. `len1 == 706 && class == 2` is not unique — around 32 records in the real file
    match that shape. A minimum password length of 4 characters is needed to reject
    one-byte coincidences.
 
 ## 6b. The password does not protect the data
 
-Tested against a real 70 MB company file. **It is not encrypted** — every record is
+Tested against a real 70 MB company file (company and customer details redacted). **It is not encrypted** — every record is
 in cleartext:
 
 ```

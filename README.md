@@ -33,11 +33,11 @@ that read it directly — no MYOB installation, no Windows, no vendor drivers.
 
 A business needed to move off MYOB v13 onto ERPNext. The blockers were:
 
-1. **The file is not self-evidently readable.** It is a binary ISAM database
+1. The file is not self-evidently readable. It is a binary ISAM database
    from 2002 with no public documentation.
-2. **The company file is password protected** and the password was unknown,
+2. The company file is password protected and the password was unknown,
    so the owner could not even open it in the MYOB UI to check their own data.
-3. **Even once open, there is no supported export** that ERPNext can consume.
+3. Even once open, there is no supported export that ERPNext can consume.
 
 This repository answers all three, and documents the evidence, so the findings
 are checkable rather than merely asserted.
@@ -50,17 +50,17 @@ are checkable rather than merely asserted.
 
 This was the pivotal discovery. MYOB v13 ships a complete c-tree Plus runtime:
 
-- **`ctmyob32.dll`** — *"MYOB Record Manager"*. Its 208 exports *are* c-tree's
+- `ctmyob32.dll` — *"MYOB Record Manager"*. Its 208 exports *are* c-tree's
   own API: `ctree`, `ctuseg`, `cttseg`, `InitCtreeGV`, `SetCtreeGV`,
   `ViewCtreeError`, plus the classic record ops (`WRTREC`, `REDREC`, `ADDREC`,
   `NXTREC`, `OPNFIL`, `CREIDX`) and `ctSETENCRYPT`. Internally it carries
   `Copyright (c) 1984-1998 FairCom Corporation` and `c-tree Plus(R)`.
-- **`MYOBSp32.dll`** — MYOB's *Data Manager* layer on top: `DMOpenDataFile`,
+- `MYOBSp32.dll` — MYOB's *Data Manager* layer on top: `DMOpenDataFile`,
   `DMNewRecord`, `DMReadRecord`, `DMBuildKey`, `DMFirstRecord`,
   `DMGetDODANameList`, `DMSetCountryCode`. Every export has a `_Name@N` stdcall
   alias, so argument counts come for free (`_DMBuildKey@20` = 5 arguments).
 
-c-tree's **DODA** (Data Object Definition Array) is the schema, which is why
+c-tree's DODA (Data Object Definition Array) is the schema, which is why
 `DMGetDODANameList` exists and why FairCom's `ctinfo` utility — whose entire job
 is "retrieves IFIL and DODA structures from a FairCom DB file" — does exactly
 what we ended up doing.
@@ -93,8 +93,8 @@ needs: `ChtAcctRec` (chart of accounts, 68 fields), `ItemsRec` (73),
 
 The encoding took some working out:
 
-- Field names are **length-prefixed Pascal strings where the declared length is
-  `strlen(name) + 2`**.
+- Field names are length-prefixed Pascal strings where the declared length is
+  `strlen(name) + 2`.
 - The record type follows in a `FE FE` resource record as a fixed-width name
   field ending in c-tree's `Z` name marker — `MiscRecZ`, `CardRecZ`.
 - **Field names and their `*RecZ` marker can be ~18 KB apart.** Association is
@@ -119,7 +119,7 @@ schema field counts).
 
 ### 5. The master password is plaintext
 
-MYOB v13 uses a **master password + sub-passwords** system. Per MYOB's own
+MYOB v13 uses a master password + sub-passwords system. Per MYOB's own
 shipped help:
 
 > *"You can have only one master password in a single company file."*
@@ -129,7 +129,7 @@ It gates *operations* — delete a sale, print cheques, payroll, Easy Setup — 
 data access, which is why the file reads fine without it.
 
 The password is stored **in plaintext**, obfuscated with a fixed 4-byte
-**additive** key:
+additive key:
 
 ```
 stored[i] = (plaintext[i] + KEY[i % 4]) & 0xFF
@@ -144,7 +144,7 @@ It lives in a class-2, 706-byte `FA FA` record at offset `+0x62`, NUL-terminated
 The same record holds the sub-password list (empty in the file examined, so the
 master password grants full access).
 
-**MYOB's "Create Backup" does not include this.** A real 22 MB backup archive
+MYOB's "Create Backup" does not include this. A real 22 MB backup archive
 (382 entries) contained the `.dat` plus the user's template folder — 229 `.xlt`
 Excel export templates, 87 `.frm` forms, 8 `.rpt`, images — and **no `.prm` and no
 `.ini` at all**.
@@ -156,14 +156,14 @@ Excel export templates, 87 `.frm` forms, 8 `.rpt`, images — and **no `.prm` an
 Reproducibility matters more than confidence here, so each claim is tied to
 evidence that can be re-checked.
 
-**The schema — validated on two independent companies.** The MYOB v13 installer
+The schema — validated on two independent companies. The MYOB v13 installer
 ships two sample companies (`tutorial.dat`, `Clearwtr.dat`). Running the
 extractor over both yields *identical* record-type sets and *identical field
 lists for every record* — 35 types, zero differences. Two unrelated files
 agreeing exactly is strong evidence the parser is reading structure rather than
 pattern-matching noise.
 
-**The password — validated by controlled differential.** The decisive step was
+The password — validated by controlled differential. The decisive step was
 creating the *same* company twice: once with no password, once with a known
 master password. Both files are byte-identical in size and differ in only 1,149
 bytes across 180 regions. Exactly one region is a 706-byte `FA FA` record that is
@@ -173,7 +173,7 @@ validated 4/4: it recovers the known password from the protected file, and
 correctly reports the unprotected file *and* both shipped sample companies as
 having no password.
 
-**Decoding traps are documented rather than hidden.** Two bugs produced
+Decoding traps are documented rather than hidden. Two bugs produced
 confident-looking nonsense and are recorded in the code comments so the next
 person does not repeat them:
 
@@ -184,7 +184,7 @@ person does not repeat them:
 2. `len1 == 706 && class == 2` is *not* unique — about 32 unrelated records in
    the real file match that shape — so a minimum password length is required.
 
-**Negative results are recorded too.** We checked for MD5, SHA-1, SHA-256, DES,
+Negative results are recorded too. We checked for MD5, SHA-1, SHA-256, DES,
 Blowfish and CRC-32 constants across `myob.exe`, `ctmyob32.dll`, `MYOBSp32.dll`
 and `myobsbt.dll` and found none. We initially misread c-tree's collating
 sequences as an obfuscation alphabet; that was wrong and is corrected in the
@@ -203,7 +203,7 @@ notes. Both instances are left in the write-up.
 | `pefile` | — | PE section/import/export inspection |
 | `msitools` / `7z` | — | Unpacking the MSI installer cabinet |
 
-The 6.7 MB `myob.exe` is a **Borland C++ Builder / Delphi** binary — the linker
+The 6.7 MB `myob.exe` is a Borland C++ Builder / Delphi binary — the linker
 emits one PE section per unit, and the unit names map straight onto the business
 domain:
 
@@ -297,18 +297,18 @@ The schema maps onto ERPNext with little translation:
 Stated plainly, because a migration tool that oversells itself is worse than one
 that does not finish:
 
-- **Field-level typing is heuristic.** The per-field descriptor table (2×u16 per
+- Field-level typing is heuristic. The per-field descriptor table (2×u16 per
   field, immediately before the field names) has been located but not fully
   aligned — one field measures 40 bytes where the table says 59. Numeric and date
   fields are therefore parsed heuristically rather than by declared type.
-- **Doctype tagging is heuristic.** Records are classified by parsing free-text
+- Doctype tagging is heuristic. Records are classified by parsing free-text
   memo content. **Review before importing.**
-- **Addresses are sparse.** Only a fraction of customers resolve to an address,
+- Addresses are sparse. Only a fraction of customers resolve to an address,
   because address text lives in a different record type that the current offset
   decode does not yet unlock. Customer *names* extract cleanly and completely.
-- **No write path.** These tools read only. Producing a valid MYOB file is a
+- No write path. These tools read only. Producing a valid MYOB file is a
   separate problem.
-- **Sub-passwords are read, not validated against.** The sub-password list lives
+- Sub-passwords are read, not validated against. The sub-password list lives
   after the master password in the same record; only the master was confirmed.
 
 The single blocker for the first three is resolving the field-descriptor
@@ -318,9 +318,9 @@ alignment. Everything else is downstream of it.
 
 ## Data and licensing
 
-- **No MYOB files, installer payloads, or customer data are included** in this
+- No MYOB files, installer payloads, or customer data are included in this
   repository. All analysis artefacts were kept outside version control.
-- **The recovered master password is redacted** from this document. A real
+- The recovered master password is redacted from this document. A real
   password recovered from a real company file should be treated as a live
   credential and rotated, not published.
 - MYOB Accounting v13 is proprietary, unsupported software owned by MYOB
